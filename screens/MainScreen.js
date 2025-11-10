@@ -2,31 +2,28 @@ import React, { useState, useEffect } from "react";
 import {
   View,
   Text,
-  TextInput,
   StyleSheet,
   TouchableOpacity,
   Alert,
-  Animated,
   ScrollView,
   Modal,
-  Platform,
-  ImageBackground,
+  Linking,
 } from "react-native";
 import * as Location from "expo-location";
-import { LinearGradient } from "expo-linear-gradient";
-import Slider from "@react-native-community/slider";
 import { useAuth } from "../contexts/AuthContext";
 import {
   Ionicons,
-  AntDesign,
   Entypo,
-  Octicons,
   Feather,
+  MaterialIcons,
+  FontAwesome,
+  FontAwesome5,
 } from "@expo/vector-icons";
+import { Polyline } from "react-native-maps";
+import ModalModern from "../components/ModalModern";
+import ModalLeads from "../components/ModalLeads";
+import ModalFiltroLeads from "../components/ModalFiltroLeads";
 
-// -------------------------
-// Funções auxiliares
-// -------------------------
 const getStatusColor = (status) => {
   switch (status) {
     case "Novo":
@@ -40,146 +37,81 @@ const getStatusColor = (status) => {
   }
 };
 
-const getTypeColor = (tipo) => {
-  return tipo === "Qualificado" ? "#673AB7" : "#FF5722";
-};
-
 const calcularDistancia = (lat1, lon1, lat2, lon2) => {
-  const R = 6371; // Raio da Terra em km
+  const R = 6371;
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
   const dLon = ((lon2 - lon1) * Math.PI) / 180;
   const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.sin(dLat / 2) ** 2 +
     Math.cos((lat1 * Math.PI) / 180) *
       Math.cos((lat2 * Math.PI) / 180) *
-      Math.sin(dLon / 2) *
-      Math.sin(dLon / 2);
+      Math.sin(dLon / 2) ** 2;
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return R * c;
 };
 
-// -------------------------
-// Componentes de mapa
-// -------------------------
-const WebMap = ({ location, leads, onLeadPress }) => (
-  <View style={styles.webMapContainer}>
-    <View style={styles.webMap}>
-      <View style={styles.mapPlaceholder}>
-        <Text style={styles.mapPlaceholderText}>🗺️ Mapa Interativo</Text>
-        <Text style={styles.mapPlaceholderSubtext}>
-          {location
-            ? `Localização atual: ${location.latitude.toFixed(
-                4
-              )}, ${location.longitude.toFixed(4)}`
-            : "Aguardando localização..."}
-        </Text>
-      </View>
-      <View style={styles.mapMarkers}>
-        {leads.map((lead, index) => (
-          <TouchableOpacity
-            key={lead.id}
-            style={[
-              styles.mapMarker,
-              {
-                top: `${20 + index * 15}%`,
-                left: `${15 + index * 20}%`,
-                backgroundColor: getStatusColor(lead.status),
-              },
-            ]}
-            onPress={() => onLeadPress(lead)}
-          >
-            <Text style={styles.markerText}>{lead.nome.charAt(0)}</Text>
-          </TouchableOpacity>
-        ))}
-        {location && (
-          <View
-            style={[styles.currentLocationMarker, { top: "50%", left: "50%" }]}
-          >
-            <View style={styles.locationPulse} />
-            <Text style={styles.locationText}>📍</Text>
-          </View>
-        )}
-      </View>
-    </View>
-  </View>
-);
+// Algoritmo de rota otimizada (vizinho mais próximo)
+const otimizarRota = (pontos, origem) => {
+  let restantes = [...pontos];
+  const rota = [];
+  let atual = origem;
 
-const MobileMap = ({ location, leads, onLeadPress }) => {
-  const MapView = require("react-native-maps").default;
-  const { Marker, Callout } = require("react-native-maps");
-  return (
-    <MapView
-      style={styles.map}
-      initialRegion={{
-        latitude: location?.latitude || -23.5505,
-        longitude: location?.longitude || -46.6333,
-        latitudeDelta: 0.05,
-        longitudeDelta: 0.05,
-      }}
-      showsUserLocation
-      showsMyLocationButton
-    >
-      {leads.map((lead) => (
-        <Marker
-          key={lead.id}
-          coordinate={{
-            latitude: lead.latitude,
-            longitude: lead.longitude,
-          }}
-          pinColor={getStatusColor(lead.status)}
-          onPress={() => onLeadPress(lead)}
-        >
-          <Callout>
-            <View style={styles.calloutContainer}>
-              <Text style={styles.calloutTitle}>{lead.nome}</Text>
-              <Text style={styles.calloutSubtitle}>
-                {lead.tipo} - {lead.status}
-              </Text>
-              <Text style={styles.calloutText}>{lead.endereco}</Text>
-            </View>
-          </Callout>
-        </Marker>
-      ))}
-    </MapView>
-  );
+  while (restantes.length > 0) {
+    let maisProximo = restantes.reduce((a, b) => {
+      const da = calcularDistancia(
+        atual.latitude,
+        atual.longitude,
+        a.latitude,
+        a.longitude
+      );
+      const db = calcularDistancia(
+        atual.latitude,
+        atual.longitude,
+        b.latitude,
+        b.longitude
+      );
+      return da < db ? a : b;
+    });
+    rota.push(maisProximo);
+    restantes = restantes.filter((p) => p.id !== maisProximo.id);
+    atual = maisProximo;
+  }
+  return rota;
 };
 
-// -------------------------
-// Dados simulados
-// -------------------------
 const fakeLeads = [
   {
     id: 1,
     nome: "A4 PROMAQ LTDA",
     email: "comercial@a4promaq.com.br",
     telefone: "(41) 3679-1200",
-    latitude: -25.3201902132732,
-    longitude: -49.0590438907532,
+    latitude: -25.32019,
+    longitude: -49.05904,
     tipo: "Potencial",
     status: "Novo",
-    endereco: "Av. JOAO SCUCATO CORADIN, 181 - Bairro A",
+    endereco: "Av. João Scucato Coradin, 181 - Bairro A",
   },
   {
     id: 2,
-    nome: "ACA INDUSTRIA E COMERCIO DE PECAS PARA AR CONDICIONADO LTDA",
+    nome: "ACA INDÚSTRIA E COMÉRCIO DE PEÇAS LTDA",
     email: "adriano.silva@aca.ind.br",
     telefone: "(41) 3098-8686",
-    latitude: -25.4912198955076,
-    longitude: -49.14888793048,
+    latitude: -25.49121,
+    longitude: -49.14888,
     tipo: "Qualificado",
     status: "Em Negociação",
-    endereco: "AV. THOMAZ CARMELIANO DE MIRANDA, 1142 - Bairro B",
+    endereco: "Av. Thomaz Carmeliano de Miranda, 1142 - Bairro B",
   },
   {
     id: 3,
-    nome: "ACESSORIOS BONELLI LTDA.",
+    nome: "ACESSORIOS BONELLI LTDA",
     email: "pedro@vendas.com",
     telefone: "(41) 3366-3787",
-    latitude: -25.4962816861804,
-    longitude: -49.1659205988311,
+    latitude: -25.49628,
+    longitude: -49.16592,
     tipo: "Potencial",
     status: "Novo",
-    endereco: "Rua MENINO JESUS, 315 - Bairro C",
+    endereco: "Rua Menino Jesus, 315 - Bairro C",
   },
   {
     id: 4,
@@ -194,29 +126,7 @@ const fakeLeads = [
   },
   {
     id: 5,
-    nome: "ALUMAIS ESQUADRIAS DE METAL LTDA",
-    email: "aspcontasul@gmail.com",
-    telefone: "(41) 3287-0966",
-    latitude: -25.49572,
-    longitude: -49.270251,
-    tipo: "Qualificado",
-    status: "Fechado",
-    endereco: "Rua José Guercheski, 530 - Novo Mundo",
-  },
-  {
-    id: 6,
-    nome: "METALÚRGICA CURITIBANA LTDA",
-    email: "contato@metalcuritibana.com.br",
-    telefone: "(41) 3342-8877",
-    latitude: -25.469871,
-    longitude: -49.297341,
-    tipo: "Potencial",
-    status: "Novo",
-    endereco: "Rua João Bettega, 2450 - Portão",
-  },
-  {
-    id: 7,
-    nome: "ELETROPAR COMPONENTES INDUSTRIAIS LTDA",
+    nome: "ELETROPAR COMPONENTES LTDA",
     email: "vendas@eletropar.com.br",
     telefone: "(41) 3327-5522",
     latitude: -25.428995,
@@ -225,85 +135,32 @@ const fakeLeads = [
     status: "Em Negociação",
     endereco: "Av. Sete de Setembro, 4550 - Batel",
   },
-  {
-    id: 8,
-    nome: "SOLARTECH ENERGIA RENOVÁVEL LTDA",
-    email: "contato@solartech.com.br",
-    telefone: "(41) 3355-9988",
-    latitude: -25.443971,
-    longitude: -49.277899,
-    tipo: "Potencial",
-    status: "Novo",
-    endereco: "Rua Itupava, 1320 - Alto da XV",
-  },
-  {
-    id: 9,
-    nome: "GRANFER INDÚSTRIA DE MÁQUINAS LTDA",
-    email: "comercial@granfer.com.br",
-    telefone: "(41) 3669-2211",
-    latitude: -25.431212,
-    longitude: -49.278801,
-    tipo: "Qualificado",
-    status: "Fechado",
-    endereco: "Rua Francisco Derosso, 640 - Xaxim",
-  },
-  {
-    id: 10,
-    nome: "CURITIBA TECH SOLUTIONS LTDA",
-    email: "suporte@curitibatech.com.br",
-    telefone: "(41) 3024-1234",
-    latitude: -25.442183,
-    longitude: -49.26741,
-    tipo: "Potencial",
-    status: "Em Negociação",
-    endereco: "Av. República Argentina, 1500 - Água Verde",
-  },
-  {
-    id: 11,
-    nome: "AUTO MECÂNICA SANTO INÁCIO LTDA",
-    email: "atendimento@santoinacioauto.com.br",
-    telefone: "(41) 3335-7700",
-    latitude: -25.450774,
-    longitude: -49.300211,
-    tipo: "Qualificado",
-    status: "Fechado",
-    endereco: "Rua Dom Pedro II, 980 - Santo Inácio",
-  },
-  {
-    id: 12,
-    nome: "PONTO CERTO MATERIAIS DE CONSTRUÇÃO LTDA",
-    email: "vendas@pontocerto.com.br",
-    telefone: "(41) 3344-1212",
-    latitude: -25.480129,
-    longitude: -49.257432,
-    tipo: "Potencial",
-    status: "Novo",
-    endereco: "Rua Eng. Rebouças, 2123 - Rebouças",
-  },
-  {
-    id: 13,
-    nome: "SUPREMA ALIMENTOS LTDA",
-    email: "financeiro@suprema.com.br",
-    telefone: "(41) 3369-8877",
-    latitude: -25.397521,
-    longitude: -49.252764,
-    tipo: "Qualificado",
-    status: "Em Negociação",
-    endereco: "Av. Manoel Ribas, 5650 - Santa Felicidade",
-  },
 ];
+
+const user = {
+  nome: "Guilherme Oliveira",
+  email: "guilherme.oliveira@gmail.com",
+  telefone: "(11) 99999-9999",
+  endereco: "Rua João Pessoa, 123 - Centro",
+};
 
 const MainScreen = () => {
   const [location, setLocation] = useState(null);
-  const [selectedLead, setSelectedLead] = useState(null);
-  const [modalVisible, setModalVisible] = useState(false);
-  const [slideAnim] = useState(new Animated.Value(-100));
-  const [bairroFiltro, setBairroFiltro] = useState("");
-  const [raioFiltro, setRaioFiltro] = useState(5);
-  const [leadsFiltrados, setLeadsFiltrados] = useState(fakeLeads);
-  const { user, logout } = useAuth();
+  const [modalFiltroVisible, setModalFiltroVisible] = useState(false);
+  const [modalLeadVisible, setModalLeadVisible] = useState(false);
+  const [modalPerfilVisible, setModalPerfilVisible] = useState(false);
+  const [modalListLeadsVisible, setModalListLeadsVisible] = useState(false);
+  const [modalRotaVisible, setModalRotaVisible] = useState(false);
+  const [leadSelecionado, setLeadSelecionado] = useState(null);
+  const [raioFiltro, setRaioFiltro] = useState(null);
+  const [leadsFiltrados, setLeadsFiltrados] = useState([]);
+  const [leadsSelecionados, setLeadsSelecionados] = useState([]);
+  const [rotaCoordenadas, setRotaCoordenadas] = useState([]);
+  const { logout } = useAuth();
 
-  // Obtém localização atual
+  const MapView = require("react-native-maps").default;
+  const { Marker } = require("react-native-maps");
+
   useEffect(() => {
     (async () => {
       const { status } = await Location.requestForegroundPermissionsAsync();
@@ -314,708 +171,537 @@ const MainScreen = () => {
       const currentLocation = await Location.getCurrentPositionAsync({});
       setLocation(currentLocation.coords);
     })();
-    Animated.timing(slideAnim, {
-      toValue: 0,
-      duration: 800,
-      useNativeDriver: true,
-    }).start();
   }, []);
 
-  const handleLeadPress = (lead) => {
-    setSelectedLead(lead);
-    setModalVisible(true);
-  };
-
-  const filtrarLeads = () => {
-    let filtrados = fakeLeads;
-
-    if (bairroFiltro.trim() !== "") {
-      filtrados = filtrados.filter((lead) =>
-        lead.endereco.toLowerCase().includes(bairroFiltro.toLowerCase())
-      );
-    }
-
-    if (location && raioFiltro > 0) {
-      filtrados = filtrados.filter((lead) => {
-        const distancia = calcularDistancia(
-          location.latitude,
-          location.longitude,
-          lead.latitude,
-          lead.longitude
-        );
-        return distancia <= raioFiltro;
-      });
-    }
-
-    setLeadsFiltrados(filtrados);
-  };
-
   const handleLogout = () => {
-    Alert.alert("Sair", "Deseja realmente sair do aplicativo?", [
+    Alert.alert("Sair", "Deseja realmente sair?", [
       { text: "Cancelar", style: "cancel" },
       { text: "Sair", onPress: () => logout() },
     ]);
   };
 
+  const handleLeadClick = () => {
+    if (!location) return;
+    const leadsOrdenados = [...fakeLeads]
+      .map((lead) => ({
+        ...lead,
+        distancia: calcularDistancia(
+          location.latitude,
+          location.longitude,
+          lead.latitude,
+          lead.longitude
+        ),
+      }))
+      .sort((a, b) => a.distancia - b.distancia);
+    setLeadsFiltrados(leadsOrdenados);
+    setModalFiltroVisible(true);
+  };
+
+  const handleSelectRaio = (raio) => {
+    if (!location) return;
+    setRaioFiltro(raio);
+    const leadsDentroRaio = fakeLeads
+      .map((lead) => ({
+        ...lead,
+        distancia: calcularDistancia(
+          location.latitude,
+          location.longitude,
+          lead.latitude,
+          lead.longitude
+        ),
+      }))
+      .filter((lead) => lead.distancia <= raio)
+      .sort((a, b) => a.distancia - b.distancia);
+    setLeadsFiltrados(leadsDentroRaio);
+  };
+
+  const handleOpenWhatsApp = (telefone) => {
+    const numeroLimpo = telefone.replace(/\D/g, "");
+    const url = `https://wa.me/55${numeroLimpo}`;
+    Linking.openURL(url).catch(() =>
+      Alert.alert("Erro", "Não foi possível abrir o WhatsApp")
+    );
+  };
+
+  const handleMarkerPress = (lead) => {
+    setLeadSelecionado(lead);
+    if (modalFiltroVisible === true) {
+      setModalFiltroVisible(false);
+    }
+
+    setModalLeadVisible(true);
+  };
+
+  const handlePerfilClick = () => {
+    setModalPerfilVisible(true);
+  };
+
+  const handleRotaClick = () => {
+    setModalRotaVisible(true);
+  };
+
+  const toggleSelecionarLead = (lead) => {
+    setLeadsSelecionados((prev) => {
+      const jaSelecionado = prev.find((l) => l.id === lead.id);
+      return jaSelecionado
+        ? prev.filter((l) => l.id !== lead.id)
+        : [...prev, lead];
+    });
+  };
+
+  const handleCriarRotaMultipla = () => {
+    if (!location || leadsSelecionados.length < 2) {
+      Alert.alert("Selecione pelo menos 2 empresas");
+      return;
+    }
+    const otimizados = otimizarRota(leadsSelecionados, location);
+    const coords = [
+      { latitude: location.latitude, longitude: location.longitude },
+      ...otimizados.map((l) => ({
+        latitude: l.latitude,
+        longitude: l.longitude,
+      })),
+    ];
+    setRotaCoordenadas(coords);
+
+    const origin = `${location.latitude},${location.longitude}`;
+    const destination = `${otimizados[otimizados.length - 1].latitude},${
+      otimizados[otimizados.length - 1].longitude
+    }`;
+    const waypoints = otimizados
+      .slice(0, -1)
+      .map((l) => `${l.latitude},${l.longitude}`)
+      .join("|");
+    const url = `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${destination}&waypoints=${waypoints}&travelmode=driving`;
+
+    Linking.openURL(url);
+  };
+
+  const handleCancelarRota = () => {
+    setLeadsSelecionados([]);
+    setRotaCoordenadas([]);
+  };
+
   return (
-    <ImageBackground
-      source={require("../assets/backgroundLogin.jpg")}
-      style={styles.backgroundImage}
-      resizeMode="cover"
-      blurRadius={2}
-      opacity={0.6}
-      backgroundColor="#000"
-    >
-      <View style={styles.container}>
-        {/* Header */}
-        <LinearGradient
-          colors={["#006b8bff", "#242424ff"]}
-          style={styles.header}
+    <View style={styles.container}>
+      {location && (
+        <MapView
+          style={styles.map}
+          region={{
+            latitude: location.latitude,
+            longitude: location.longitude,
+            latitudeDelta: 0.08,
+            longitudeDelta: 0.08,
+          }}
+          showsUserLocation
         >
-          <Animated.View
-            style={[
-              styles.headerContent,
-              { transform: [{ translateY: slideAnim }] },
-            ]}
-          >
-            <View style={{ textAlign: "center" }}>
-              <Text style={{ color: "#fff", fontSize: 18 }}>
-                BARRA DE PESQUISA - IMPLEMENTAR
-              </Text>
-            </View>
-          </Animated.View>
-        </LinearGradient>
-
-        {/* 🔍 Filtros */}
-        {/* <View style={styles.filtroContainer}>
-          <TextInput
-            style={styles.inputFiltro}
-            placeholder="Filtrar por bairro..."
-            value={bairroFiltro}
-            onChangeText={setBairroFiltro}
-          />
-          <View style={styles.raioContainer}>
-            <Text style={styles.labelRaio}>Raio: {raioFiltro} km</Text>
-            <Slider
-              style={{ width: 150 }}
-              minimumValue={1}
-              maximumValue={50}
-              step={1}
-              value={raioFiltro}
-              onValueChange={setRaioFiltro}
+          {(raioFiltro ? leadsFiltrados : fakeLeads).map((lead) => (
+            <Marker
+              key={lead.id}
+              coordinate={{
+                latitude: lead.latitude,
+                longitude: lead.longitude,
+              }}
+              pinColor={getStatusColor(lead.status)}
+              onPress={() => handleMarkerPress(lead)}
             />
-          </View>
-          <TouchableOpacity style={styles.botaoFiltro} onPress={filtrarLeads}>
-            <Text style={styles.botaoFiltroTexto}>Aplicar Filtro</Text>
-          </TouchableOpacity>
-        </View> */}
+          ))}
 
-        {/* 🗺️ Mapa */}
-        {/* <View style={styles.mapContainer}>
-          {Platform.OS === "web" ? (
-            <WebMap
-              location={location}
-              leads={leadsFiltrados}
-              onLeadPress={handleLeadPress}
-            />
-          ) : (
-            <MobileMap
-              location={location}
-              leads={leadsFiltrados}
-              onLeadPress={handleLeadPress}
+          {/* Exibe a rota no mapa */}
+          {rotaCoordenadas.length > 1 && (
+            <Polyline
+              coordinates={rotaCoordenadas}
+              strokeColor="#007BFF"
+              strokeWidth={4}
             />
           )}
-        </View> */}
+        </MapView>
+      )}
 
-        {/* Lista de leads */}
-        {/* <View style={styles.leadsContainer}>
-          <Text style={styles.leadsTitle}>
-            Leads Próximos ({leadsFiltrados.length})
-          </Text>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            style={styles.leadsScroll}
+      <ModalModern
+        visible={modalPerfilVisible}
+        onClose={() => setModalPerfilVisible(false)}
+        user={{
+          nome: "Guilherme Oliveira",
+          email: "guilherme@empresa.com",
+          telefone: "(41) 98888-7777",
+          foto: "https://i.pravatar.cc/150?img=12",
+        }}
+        onEditar={() =>
+          Alert.alert("Editar Perfil", "Função em desenvolvimento.")
+        }
+        onSenha={() =>
+          Alert.alert("Alterar Senha", "Função em desenvolvimento.")
+        }
+        onLogout={() => logout()}
+      />
+
+      {/* Botões Usuario */}
+      <View style={styles.userContainer}>
+        <TouchableOpacity style={styles.userButton} onPress={handlePerfilClick}>
+          <FontAwesome name="user-circle-o" size={36} color="#fff" />
+          <View>
+            <Text style={styles.userButtonTextNome}>{user.nome}</Text>
+          </View>
+        </TouchableOpacity>
+      </View>
+
+      {/* Botões de rota */}
+      {leadsSelecionados.length > 1 && (
+        <View style={styles.rotaContainer}>
+          <TouchableOpacity
+            style={styles.botaoRota}
+            onPress={handleCriarRotaMultipla}
           >
-            {leadsFiltrados.map((lead) => (
-              <TouchableOpacity
-                key={lead.id}
-                style={styles.leadCard}
-                onPress={() => handleLeadPress(lead)}
-              >
-                <View style={styles.leadHeader}>
-                  <Text style={styles.leadName}>{lead.nome}</Text>
-                  <View
+            <FontAwesome5 name="route" size={20} color="#fff" />
+            <Text style={styles.textoRota}>
+              Criar Rota ({leadsSelecionados.length} paradas)
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              styles.botaoRota,
+              { backgroundColor: "#d9534f", marginTop: 10 },
+            ]}
+            onPress={handleCancelarRota}
+          >
+            <Entypo name="cross" size={20} color="#fff" />
+            <Text style={styles.textoRota}>Cancelar</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      <ModalFiltroLeads
+        visible={modalFiltroVisible}
+        leads={leadsFiltrados}
+        onClose={() => setModalFiltroVisible(false)}
+        onSelectLead={(selecionados) => setLeadsSelecionados(selecionados)}
+        selectedLeads={leadsSelecionados}
+        onApply={(selecionados) => {
+          setLeadsSelecionados(selecionados);
+          setModalFiltroVisible(false);
+        }}
+        onFilterChange={(filtros) => {
+          console.log("Filtros aplicados:", filtros);
+        }}
+      />
+
+      {/* Modal de Rota */}
+      <Modal
+        visible={modalRotaVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setModalRotaVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Leads Encontrados</Text>
+
+            <View style={styles.tagContainer}>
+              {[5, 10, 15, 20, 25].map((km) => (
+                <TouchableOpacity
+                  key={km}
+                  style={[
+                    styles.tag,
+                    raioFiltro === km && styles.tagSelecionada,
+                  ]}
+                  onPress={() => handleSelectRaio(km)}
+                >
+                  <Text
                     style={[
-                      styles.statusBadge,
-                      { backgroundColor: getStatusColor(lead.status) },
+                      styles.tagText,
+                      raioFiltro === km && styles.tagTextSelecionada,
                     ]}
                   >
-                    <Text style={styles.statusText}>{lead.status}</Text>
-                  </View>
-                </View>
-                <Text style={styles.leadType}>{lead.tipo}</Text>
-                <Text style={styles.leadAddress}>{lead.endereco}</Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-        </View> */}
-
-        {/* Footer */}
-        <View
-          style={styles.footer}
-        >
-          <Animated.View
-            style={[
-              styles.headerContent,
-              { transform: [{ translateY: slideAnim }] },
-            ]}
-          >
-            <View style={styles.userInfo}>
-              <View>
-                <Feather name="userss" size={24} color="#fff" />
-              </View>
-              <View>
-                <Feather name="user" size={24} color="#fff" />
-              </View>
-              <View>
-                <Feather name="user" size={24} color="#fff" />
-              </View>
-              <TouchableOpacity
-                style={styles.logoutButton}
-                onPress={handleLogout}
-              >
-                <Entypo name="log-out" size={24} color="#fff" />
-                <Text style={styles.logoutButtonText}>Logout</Text>
-              </TouchableOpacity>
+                    {km} km
+                  </Text>
+                </TouchableOpacity>
+              ))}
             </View>
-          </Animated.View>
-        </View>
 
-        <Modal
-          animationType="slide"
-          transparent={true}
-          visible={modalVisible}
-          onRequestClose={() => setModalVisible(false)}
-        >
-          <View style={styles.modalContainer}>
-            <View style={styles.modalContent}>
-              {selectedLead && (
-                <>
-                  <View style={styles.modalHeader}>
-                    <Text style={styles.modalTitle}>{selectedLead.nome}</Text>
-                    <TouchableOpacity
-                      style={styles.modalClose}
-                      onPress={() => setModalVisible(false)}
-                    >
-                      <Text style={styles.modalCloseText}>×</Text>
-                    </TouchableOpacity>
-                  </View>
+            <ScrollView style={{ marginTop: 10, maxHeight: 300 }}>
+              {leadsFiltrados.map((lead) => {
+                const selecionado = leadsSelecionados.find(
+                  (l) => l.id === lead.id
+                );
+                return (
+                  <TouchableOpacity
+                    key={lead.id}
+                    style={[
+                      styles.leadCard,
+                      selecionado && { backgroundColor: "#e0f7e9" },
+                    ]}
+                    onPress={() => toggleSelecionarLead(lead)}
+                  >
+                    <FontAwesome
+                      name={selecionado ? "check-circle" : "circle-thin"}
+                      size={18}
+                      color={selecionado ? "#4CAF50" : "#ccc"}
+                      style={{ marginRight: 8 }}
+                    />
+                    <View>
+                      <Text style={styles.leadName}>{lead.nome}</Text>
+                      <Text style={styles.leadInfo}>{lead.endereco}</Text>
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
 
-                  <ScrollView style={styles.modalBody}>
-                    <View style={styles.detailRow}>
-                      <Text style={styles.detailLabel}>Email:</Text>
-                      <Text style={styles.detailValue}>
-                        {selectedLead.email}
-                      </Text>
-                    </View>
-                    <View style={styles.detailRow}>
-                      <Text style={styles.detailLabel}>Telefone:</Text>
-                      <Text style={styles.detailValue}>
-                        {selectedLead.telefone}
-                      </Text>
-                    </View>
-                    <View style={styles.detailRow}>
-                      <Text style={styles.detailLabel}>Endereço:</Text>
-                      <Text style={styles.detailValue}>
-                        {selectedLead.endereco}
-                      </Text>
-                    </View>
-                    <View style={styles.detailRow}>
-                      <Text style={styles.detailLabel}>Tipo:</Text>
-                      <View
-                        style={[
-                          styles.typeBadge,
-                          { backgroundColor: getTypeColor(selectedLead.tipo) },
-                        ]}
-                      >
-                        <Text style={styles.typeText}>{selectedLead.tipo}</Text>
-                      </View>
-                    </View>
-                    <View style={styles.detailRow}>
-                      <Text style={styles.detailLabel}>Status:</Text>
-                      <View
-                        style={[
-                          styles.statusBadgeModal,
-                          {
-                            backgroundColor: getStatusColor(
-                              selectedLead.status
-                            ),
-                          },
-                        ]}
-                      >
-                        <Text style={styles.statusTextModal}>
-                          {selectedLead.status}
-                        </Text>
-                      </View>
-                    </View>
-                  </ScrollView>
-
-                  <View style={styles.modalFooter}>
-                    <TouchableOpacity style={styles.actionButton}>
-                      <Text style={styles.actionButtonText}>Ligar</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={styles.actionButton}>
-                      <Text style={styles.actionButtonText}>WhatsApp</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={styles.actionButtonPrimary}>
-                      <Text style={styles.actionButtonPrimaryText}>
-                        Visitar
-                      </Text>
-                    </TouchableOpacity>
-                  </View>
-                </>
-              )}
-            </View>
+            <TouchableOpacity
+              style={[styles.applyButton, { marginTop: 15 }]}
+              onPress={() => setModalRotaVisible(false)}
+            >
+              <Text style={styles.applyButtonText}>Fechar</Text>
+            </TouchableOpacity>
           </View>
-        </Modal>
+        </View>
+      </Modal>
+
+      {/* Novo Modal de Leads */}
+      <ModalLeads
+        visible={modalListLeadsVisible}
+        leads={leadsFiltrados}
+        onClose={() => setModalListLeadsVisible(false)}
+        onSelectLead={(selecionados) => setLeadsSelecionados(selecionados)}
+        selectedLeads={leadsSelecionados}
+      />
+
+      {/* Modal de informações do lead */}
+      <Modal
+        visible={modalLeadVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setModalLeadVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            {leadSelecionado && (
+              <>
+                <Text style={styles.modalTitle}>
+                  <FontAwesome name="building-o" size={20} color="#000" />{" "}
+                  {leadSelecionado.nome}
+                </Text>
+                <Text>Email: {leadSelecionado.email}</Text>
+                <Text>Telefone: {leadSelecionado.telefone}</Text>
+                <Text>Endereço: {leadSelecionado.endereco}</Text>
+                <Text>Status: {leadSelecionado.status}</Text>
+                <Text>Tipo: {leadSelecionado.tipo}</Text>
+
+                <View style={styles.buttonRow}>
+                  <TouchableOpacity
+                    style={[
+                      styles.actionButton,
+                      { backgroundColor: "#25D366" },
+                    ]}
+                    onPress={() => handleOpenWhatsApp(leadSelecionado.telefone)}
+                  >
+                    <FontAwesome name="whatsapp" size={20} color="#fff" />
+                    <Text style={styles.buttonText}>WhatsApp</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[
+                      styles.actionButton,
+                      { backgroundColor: "#4285F4" },
+                    ]}
+                    onPress={() => {
+                      setLeadsSelecionados([leadSelecionado]);
+                      setModalLeadVisible(false);
+                    }}
+                  >
+                    <FontAwesome5 name="route" size={20} color="#fff" />
+                    <Text style={styles.buttonText}>Criar Rota</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[
+                      styles.actionButton,
+                      { backgroundColor: "#FFA000" },
+                    ]}
+                  >
+                    <FontAwesome name="folder-open" size={20} color="#fff" />
+                    <Text style={styles.buttonText}>Criar Contato</Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            )}
+            <TouchableOpacity
+              style={[styles.applyButton, { marginTop: 15 }]}
+              onPress={() => setModalLeadVisible(false)}
+            >
+              <Text style={styles.applyButtonText}>Fechar</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Barra Inferior */}
+      <View style={styles.bottomNav}>
+        <TouchableOpacity style={styles.navItem} onPress={handleRotaClick}>
+          <FontAwesome5 name="route" size={20} color="#fff" />
+          <Text style={styles.navText}>Rotas</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.navItem} onPress={() => setModalListLeadsVisible(true)}>
+          <Feather name="users" size={22} color="#fff" />
+          <Text style={styles.navText}>Leads</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.navItem}
+          onPress={() => setModalPerfilVisible(true)}
+        >
+          <MaterialIcons name="person-outline" size={26} color="#fff" />
+          <Text style={styles.navText}>Perfil</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.navItem}
+          onPress={() => setModalFiltroVisible(true)}
+        >
+          <MaterialIcons name="person-outline" size={26} color="#fff" />
+          <Text style={styles.navText}>Filtrar</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.navItem} onPress={handleLogout}>
+          <Entypo name="log-out" size={22} color="#fff" />
+          <Text style={styles.navText}>Logout</Text>
+        </TouchableOpacity>
       </View>
-    </ImageBackground>
+    </View>
   );
 };
 
+export default MainScreen;
+
 const styles = StyleSheet.create({
-  backgroundImage: {
+  container: { flex: 1 },
+  map: { flex: 1, marginTop: 40, marginBottom: 40 },
+  modalOverlay: {
     flex: 1,
-    width: "100%",
-    height: "100%",
-  },
-  overlay: {
-    flex: 1,
-  },
-  container: {
-    flex: 1,
-    height: "90%",
-    marginBottom: "10%",
-  },
-  header: {
-    marginTop: 60,
-    marginHorizontal: 10,
-    paddingTop: 10,
-    paddingBottom: 10,
-    paddingHorizontal: 16,
-    width: "100dvw",
-    borderRadius: 50,
-    height: 70,
-    justifyContent: "center",
-  },
-  headerContent: {
-    flexDirection: "row",
-    justifyContent: "space-around",
-    alignItems: "center",
-    width: "90%",
-    paddingHorizontal: 10,
-  },
-  userInfo: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 10,
-    
-  },
-  userAvatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "rgba(255, 255, 255, 0.3)",
+    backgroundColor: "rgba(0,0,0,0.4)",
     justifyContent: "center",
     alignItems: "center",
-    marginRight: 12,
-  },
-  userAvatarText: {
-    color: "#fff",
-    fontSize: 18,
-    fontWeight: "bold",
-  },
-  userDetails: {
-    flex: 1,
-    marginRight: 10,
-  },
-  userName: {
-    color: "#fff",
-    fontSize: 16,
-    fontWeight: "600",
-  },
-  userEmail: {
-    color: "rgba(255, 255, 255, 0.8)",
-    fontSize: 12,
-  },
-  logoutButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 15,
-    paddingRight: 12,
-    minWidth: 60,
-    alignItems: "center",
-  },
-  logoutButtonText: {
-    color: "#fff",
-    fontSize: 12,
-    fontWeight: "600",
-  },
-  mapContainer: {
-    flex: 1,
-    marginHorizontal: 16,
-    marginVertical: 12,
-    borderRadius: 16,
-    overflow: "hidden",
-    shadowColor: "#000",
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.15,
-    shadowRadius: 6,
-    elevation: 3,
-  },
-  map: {
-    flex: 1,
-  },
-  webMapContainer: {
-    flex: 1,
-    borderRadius: 16,
-    overflow: "hidden",
-  },
-  webMap: {
-    flex: 1,
-    position: "relative",
-    backgroundColor: "#f0f8ff",
-  },
-  mapPlaceholder: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    backgroundColor: "#f0f8ff",
-    borderRadius: 16,
-  },
-  mapPlaceholderText: {
-    fontSize: 24,
-    fontWeight: "bold",
-    color: "#2196F3",
-    marginBottom: 8,
-  },
-  mapPlaceholderSubtext: {
-    fontSize: 12,
-    color: "#666",
-    textAlign: "center",
-  },
-  mapMarkers: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-  },
-  mapMarker: {
-    position: "absolute",
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    justifyContent: "center",
-    alignItems: "center",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 2,
-    elevation: 4,
-  },
-  markerText: {
-    color: "#fff",
-    fontWeight: "bold",
-    fontSize: 14,
-  },
-  currentLocationMarker: {
-    position: "absolute",
-    width: 40,
-    height: 40,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  locationPulse: {
-    position: "absolute",
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "#2196F3",
-    opacity: 0.3,
-  },
-  locationText: {
-    fontSize: 20,
-    zIndex: 1,
-  },
-  calloutContainer: {
-    padding: 10,
-    minWidth: 150,
-  },
-  calloutTitle: {
-    fontSize: 16,
-    fontWeight: "bold",
-    color: "#333",
-    marginBottom: 2,
-  },
-  calloutSubtitle: {
-    fontSize: 12,
-    color: "#666",
-    marginBottom: 4,
-  },
-  calloutText: {
-    fontSize: 11,
-    color: "#888",
-  },
-  leadsContainer: {
-    backgroundColor: "#fff",
-    paddingHorizontal: 12,
-    paddingBottom: 16,
-    borderRadius: 20,
-    paddingTop: 16,
-    paddingLeft: 16,
-    paddingRight: 16,
-    shadowColor: "#000",
-    shadowOffset: {
-      width: 0,
-      height: -4,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 10,
-    maxHeight: "25%",
-    margin: 16,
-  },
-  leadsTitle: {
-    fontSize: 18,
-    fontWeight: "bold",
-    color: "#333",
-    marginBottom: 5,
-  },
-  leadsScroll: {
-    flexDirection: "row",
-    padding: 8,
-  },
-  leadCard: {
-    backgroundColor: "#f8f9fa",
-    padding: 15,
-    marginRight: 10,
-    borderRadius: 15,
-    minWidth: 150,
-    shadowColor: "#000",
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  leadHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 8,
-  },
-  leadName: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#333",
-    flex: 1,
-  },
-  statusBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 10,
-    marginLeft: 8,
-  },
-  statusText: {
-    color: "#fff",
-    fontSize: 10,
-    fontWeight: "600",
-  },
-  leadType: {
-    fontSize: 12,
-    color: "#666",
-    marginBottom: 4,
-  },
-  leadAddress: {
-    fontSize: 11,
-    color: "#888",
-  },
-  modalContainer: {
-    flex: 1,
-    backgroundColor: "rgba(0, 0, 0, 0.5)",
-    justifyContent: "flex-end",
   },
   modalContent: {
+    width: "85%",
     backgroundColor: "#fff",
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
+    borderRadius: 16,
     padding: 20,
-    maxHeight: "80%",
+    elevation: 10,
   },
-  modalHeader: {
+  modalTitle: { fontSize: 18, fontWeight: "bold", marginBottom: 10 },
+  tagContainer: {
     flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 20,
-    paddingBottom: 15,
-    borderBottomWidth: 1,
-    borderBottomColor: "#e9ecef",
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: "bold",
-    color: "#333",
-  },
-  modalClose: {
-    padding: 5,
-  },
-  modalCloseText: {
-    fontSize: 24,
-    color: "#999",
-  },
-  modalBody: {
-    marginBottom: 20,
-  },
-  detailRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 15,
-  },
-  detailLabel: {
-    fontSize: 14,
-    color: "#666",
-    fontWeight: "500",
-  },
-  detailValue: {
-    fontSize: 14,
-    color: "#333",
-    flex: 1,
-    textAlign: "right",
-  },
-  typeBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 10,
-  },
-  typeText: {
-    color: "#fff",
-    fontSize: 12,
-    fontWeight: "600",
-  },
-  statusBadgeModal: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 10,
-  },
-  statusTextModal: {
-    color: "#fff",
-    fontSize: 12,
-    fontWeight: "600",
-  },
-  modalFooter: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    gap: 10,
-  },
-  footerContent: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingHorizontal: 16,
-    width: "100%",
-    borderRadius: 50,
-    height: 70,
+    flexWrap: "wrap",
     justifyContent: "center",
-  },
-  footer: {
-    marginTop: 60,
-    marginHorizontal: 10,
-    paddingTop: 10,
-    paddingBottom: 10,
-    paddingHorizontal: 16,
-    width: "100dvw",
-    borderRadius: 50,
-    height: 70,
-    justifyContent: "space-around",
-    alignItems: "center",
-    backgroundColor: "rgba(209, 209, 209, 0.2)",
-  },
-  actionButton: {
-    flex: 1,
-    paddingVertical: 12,
-    paddingHorizontal: 15,
-    backgroundColor: "#f8f9fa",
-    borderRadius: 10,
-    alignItems: "center",
-  },
-  actionButtonText: {
-    color: "#666",
-    fontSize: 14,
-    fontWeight: "600",
-  },
-  actionButtonPrimary: {
-    flex: 1,
-    paddingVertical: 12,
-    paddingHorizontal: 15,
-    backgroundColor: "#667eea",
-    borderRadius: 10,
-    alignItems: "center",
-  },
-  actionButtonPrimaryText: {
-    color: "#fff",
-    fontSize: 14,
-    fontWeight: "600",
-  },
-  filtroContainer: {
-    backgroundColor: "#fff",
-    marginHorizontal: 16,
-    marginTop: 10,
-    padding: 12,
-    borderRadius: 12,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  inputFiltro: {
-    borderWidth: 1,
-    borderColor: "#ccc",
-    borderRadius: 8,
-    padding: 8,
     marginBottom: 10,
-    fontSize: 14,
   },
-  raioContainer: {
+  tag: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    backgroundColor: "#f1f1f1",
+    borderRadius: 15,
+    margin: 5,
+  },
+  tagSelecionada: { backgroundColor: "#007BFF" },
+  tagText: { color: "#333" },
+  tagTextSelecionada: { color: "#fff", fontWeight: "bold" },
+  leadCard: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: 10,
+    backgroundColor: "#f9f9f9",
+    padding: 10,
+    borderRadius: 8,
+    marginBottom: 8,
   },
-  labelRaio: {
-    fontSize: 14,
-    color: "#333",
+  leadName: { fontWeight: "bold", color: "#222" },
+  leadInfo: { color: "#666" },
+
+  userContainer: {
+    position: "absolute",
+    top: 60,
+    left: 10,
+    display: "flex",
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "#1a1a1a",
+    borderRadius: 30,
+    paddingRight: 18,
+    paddingLeft: 6,
   },
-  botaoFiltro: {
-    backgroundColor: "#667eea",
+  userButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    justifyContent: "flex-start",
     paddingVertical: 10,
     borderRadius: 8,
+    marginHorizontal: 5,
+  },
+  userButtonTextNome: { color: "#fff", marginLeft: 6, fontWeight: "bold" },
+  userButtonTextEmail: {
+    color: "#fff",
+    marginLeft: 6,
+    fontWeight: "ultralight",
+    fontStyle: "italic",
+    fontSize: 10,
+  },
+  applyButton: {
+    backgroundColor: "#007BFF",
+    paddingVertical: 10,
+    borderRadius: 10,
     alignItems: "center",
   },
-  botaoFiltroTexto: {
-    color: "#fff",
-    fontWeight: "600",
-    fontSize: 14,
+  applyButtonText: { color: "#fff", fontWeight: "600" },
+  rotaContainer: {
+    position: "absolute",
+    bottom: 140,
+    left: 0,
+    right: 0,
+    alignItems: "center",
   },
+  botaoRota: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#4285F4",
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 25,
+    elevation: 5,
+  },
+  textoRota: { color: "#fff", fontWeight: "bold", marginLeft: 8 },
+  buttonRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginTop: 15,
+  },
+  actionButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 8,
+    marginHorizontal: 5,
+  },
+  buttonText: { color: "#fff", marginLeft: 6, fontWeight: "bold" },
+  bottomNav: {
+    position: "absolute",
+    bottom: 70,
+    left: 0,
+    right: 0,
+    backgroundColor: "#1a1a1a",
+    flexDirection: "row",
+    justifyContent: "space-around",
+    alignItems: "center",
+    paddingVertical: 10,
+    marginHorizontal: 20,
+    borderRadius: 30,
+  },
+  navItem: { alignItems: "center" },
+  navText: { color: "#fff", fontSize: 12, marginTop: 4 },
 });
-
-export default MainScreen;
